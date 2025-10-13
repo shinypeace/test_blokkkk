@@ -63,6 +63,9 @@
             -ms-user-select: none;
             user-select: none;
         }
+        body.dragging {
+             cursor: grabbing;
+        }
 
         #app-container {
             width: 100%;
@@ -238,8 +241,7 @@
         
         .grid-cell.filled-cell {
             transition: transform 0.3s ease-out, box-shadow 0.3s;
-            transform: scale(1.05);
-            box-shadow: 0 0 10px rgba(255,255,255,0.3);
+            /* Metallic look is applied directly via JS */
         }
         
         .grid-cell.clearing {
@@ -249,7 +251,8 @@
         }
 
         .grid-cell.preview {
-            opacity: 0.5;
+            background-color: rgba(255, 255, 255, 0.3) !important;
+            border-radius: 6px;
         }
         
         .bomb-cell {
@@ -314,8 +317,6 @@
         }
         .piece-cell.filled {
             border-radius: 4px;
-            border: 1px solid rgba(255,255,255,0.3);
-            box-shadow: inset 0 2px 2px rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0,0,0,0.2);
         }
         .piece.disabled {
             opacity: 0.3;
@@ -336,10 +337,9 @@
         #floating-piece-container .piece {
             position: absolute;
             transform-origin: center center;
-            transform: scale(1.5);
-            opacity: 0.8;
             will-change: transform;
             filter: drop-shadow(0 5px 15px rgba(0,0,0,0.3));
+            transition: transform 0.1s ease-out;
         }
         
         /* --- МОДАЛЬНЫЕ ОКНА --- */
@@ -431,7 +431,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                 </button>
                 <button id="stats-btn" class="icon-btn" title="Статистика">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M12 11v-1"></path><path d="M12 8V7"></path><path d="M12 15v-1"></path></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10"></path><path d="M18 20V4"></path><path d="M6 20V16"></path></svg>
                 </button>
                 <button id="settings-btn" class="icon-btn" title="Настройки">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -509,34 +509,57 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-    // --- ЗВУКОВОЙ ДВИЖОК ---
+    // --- УЛУЧШЕННЫЙ ЗВУКОВОЙ ДВИЖОК ---
     const sound = {
         isInitialized: false,
         soundsEnabled: true,
-        synth: null,
+        synths: {},
         init() {
             if (this.isInitialized || typeof Tone === 'undefined') return;
-            this.synth = new Tone.PolySynth(Tone.Synth, {
+            const reverb = new Tone.Reverb(0.5).toDestination();
+            this.synths.tap = new Tone.Synth({
                 oscillator: { type: 'sine' },
-                envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.2 }
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 }
+            }).connect(reverb);
+            this.synths.place = new Tone.MembraneSynth({
+                 pitchDecay: 0.01, octaves: 5,
+                 envelope: { attack: 0.001, decay: 0.2, sustain: 0 }
+            }).connect(reverb);
+            this.synths.clear = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: 'fatsawtooth' },
+                envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 }
+            }).connect(reverb);
+            this.synths.gameOver = new Tone.Synth({
+                 oscillator: { type: 'square' },
+                 envelope: { attack: 0.02, decay: 0.5, sustain: 0.1, release: 0.5 }
             }).toDestination();
             this.isInitialized = true;
         },
-        play(note, duration = '16n', time = '+0') {
+        play(synthName, note, duration = '8n', time = '+0') {
             if (!this.isInitialized || !this.soundsEnabled) return;
             try {
-                this.synth.triggerAttackRelease(note, duration, Tone.now() + time);
+                this.synths[synthName].triggerAttackRelease(note, duration, Tone.now() + time);
             } catch(e) { console.warn("Sound play error", e); }
         },
-        tap() { this.play('C5'); },
-        place() { this.play(['E4', 'G4'], '8n'); },
-        clear() {
-            this.play('C5', '8n', '0');
-            this.play('E5', '8n', '0.1');
-            this.play('G5', '8n', '0.2');
-        },
-        gameOver() { this.play(['C4', 'G3', 'E3'], '4n'); }
+        tap() { this.play('tap', 'C5'); },
+        place() { this.play('place', 'C2', '8n'); },
+        clear() { this.play('clear', ['C5', 'E5', 'G5'], '16n'); },
+        gameOver() { this.play('gameOver', 'C3', '2n'); }
     };
+    
+    // --- Функция для создания металлической текстуры ---
+    function getMetallicStyle(color) {
+        // This function is a simplified way to create a metallic look.
+        // It's not physically accurate but gives a nice visual effect.
+        const colorObj = new THREE.Color(color.replace('var(', '').replace(')', ''));
+        const lighter = '#' + colorObj.clone().multiplyScalar(1.5).getHexString();
+        const darker = '#' + colorObj.clone().multiplyScalar(0.6).getHexString();
+        return `
+            background: ${color};
+            background-image: linear-gradient(135deg, ${lighter} 0%, ${color} 50%, ${darker} 100%);
+            box-shadow: inset 0 1px 2px 0 rgba(255,255,255,0.4), inset 0 -1px 2px 0 rgba(0,0,0,0.4), 0 1px 1px rgba(0,0,0,0.2);
+        `;
+    }
 
     // --- ОПРЕДЕЛЕНИЕ БЛОКОВ ---
     const BLOCKS = {
@@ -570,7 +593,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // --- Состояние игры ---
     const GRID_SIZE = 8;
-    const FLOATING_PIECE_Y_OFFSET = 60;
     let gameState = {
         gridState: [], score: 0, currentPieces: [], gameMode: 'classic',
         isPaused: false, isGameOver: false, stats: {}, reviveUsed: false,
@@ -697,7 +719,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 setTimeout(() => {
                     rowsToClear.forEach(r => { for (let c=0;c<GRID_SIZE;c++) clearCell(r,c); });
-                    colsToClear.forEach(c => { for (let r=0;r<GRID_SIZE;r++) clearCell(r,c); });
+                    colsToClear.forEach(c => { for (let r=0;c<GRID_SIZE;r++) clearCell(r,c); });
                     
                     gameState.isGameOver = false;
                     if (gameState.gameMode === 'time') {
@@ -747,6 +769,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         gameState.currentPieces = [];
         const pieceSet = (gameState.gameMode === 'expanded') ? allExpandedBlocks : BLOCKS.classic;
         const pieceKeys = Object.keys(pieceSet);
+        const computedStyle = getComputedStyle(document.documentElement);
 
         for (let i = 0; i < 3; i++) {
             const randomKey = pieceKeys[Math.floor(Math.random() * pieceKeys.length)];
@@ -754,9 +777,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             const randomShapeIndex = Math.floor(Math.random() * pieceData.s.length);
             const shape = pieceData.s[randomShapeIndex];
             const pieceId = `p${Date.now()}${i}`;
+            
+            // Resolve CSS variable to actual color value
+            const colorVar = pieceData.c;
+            const actualColor = computedStyle.getPropertyValue(colorVar.match(/--[a-zA-Z0-9-]+/)[0]).trim();
+            
             const pieceInfo = {
-                id: pieceId, shape: shape, color: pieceData.c,
-                element: createPieceElement(shape, pieceData.c, pieceId),
+                id: pieceId, shape: shape, color: actualColor,
+                element: createPieceElement(shape, actualColor, pieceId),
                 size: shape.flat().reduce((a, b) => a + b, 0)
             };
             gameState.currentPieces.push(pieceInfo);
@@ -774,13 +802,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         pieceElement.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
         pieceElement.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
+        const metallicStyle = getMetallicStyle(color);
+
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
                 const cell = document.createElement('div');
                 cell.classList.add('piece-cell');
                 if (shape[r][c] === 1) {
                     cell.classList.add('filled');
-                    cell.style.backgroundColor = color;
+                    cell.style.cssText = metallicStyle;
                 }
                 pieceElement.appendChild(cell);
             }
@@ -788,19 +818,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         return pieceElement;
     }
 
-    // --- Drag & Drop ---
+    // --- УЛУЧШЕННЫЙ Drag & Drop ---
     let draggedPieceInfo = null;
     let floatingPiece = null;
     function getCoordsFromEvent(e) { return e.touches ? e.touches[0] : e; }
 
     function onDragStart(e) {
-        if (draggedPieceInfo) return;
+        if (draggedPieceInfo || (e.type === 'mousedown' && e.button !== 0)) return;
         const pieceEl = e.target.closest('.piece');
         if (!pieceEl || pieceEl.classList.contains('disabled')) return;
+        
+        e.preventDefault();
+        
         draggedPieceInfo = gameState.currentPieces.find(p => p.id === pieceEl.id);
         if (!draggedPieceInfo) return;
-        e.preventDefault();
-
+        
         const pieceRect = pieceEl.getBoundingClientRect();
         const coords = getCoordsFromEvent(e);
         const relativeX = coords.clientX - pieceRect.left;
@@ -817,84 +849,94 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         draggedPieceInfo.touchOffset = { r: touchedRow, c: touchedCol };
+        
         floatingPiece = draggedPieceInfo.element.cloneNode(true);
+        floatingPiece.style.transform = `scale(1.5)`;
         floatingPieceContainer.appendChild(floatingPiece);
-        const floatingPieceWidth = pieceRect.width / pieceCols;
-        const floatingPieceHeight = pieceRect.height / pieceRows;
-        floatingPiece.style.left = `-${(draggedPieceInfo.touchOffset.c + 0.5) * floatingPieceWidth}px`;
-        floatingPiece.style.top = `-${(draggedPieceInfo.touchOffset.r + 0.5) * floatingPieceHeight + FLOATING_PIECE_Y_OFFSET}px`;
-
-        onDragMove(e);
+        
+        onDragMove(e); // Initial position update
+        
         draggedPieceInfo.element.style.opacity = '0.3';
-
+        document.body.classList.add('dragging');
+        
         if (e.type === 'mousedown') {
             window.addEventListener('mousemove', onDragMove);
-            window.addEventListener('mouseup', onDragEnd); 
+            window.addEventListener('mouseup', onDragEnd, { once: true }); 
         } else {
             window.addEventListener('touchmove', onDragMove, { passive: false });
-            window.addEventListener('touchend', onDragEnd);
+            window.addEventListener('touchend', onDragEnd, { once: true });
         }
     }
 
     function onDragMove(e) {
         if (!draggedPieceInfo) return;
         e.preventDefault();
+        
         const coords = getCoordsFromEvent(e);
-        if (floatingPiece) {
-            floatingPieceContainer.style.transform = `translate(${coords.clientX}px, ${coords.clientY}px)`;
-        }
-        const shadowCheckX = coords.clientX;
-        const shadowCheckY = coords.clientY - FLOATING_PIECE_Y_OFFSET;
-        const { row: anchorRow, col: anchorCol } = getGridCoordsFromScreen(shadowCheckX, shadowCheckY);
+        const gridCellSize = gridRect.width / GRID_SIZE;
+        
+        // Center the floating piece under the cursor/finger
+        const floatingPieceWidth = draggedPieceInfo.shape[0].length * gridCellSize * 1.5;
+        const floatingPieceHeight = draggedPieceInfo.shape.length * gridCellSize * 1.5;
+
+        // Position the container, then offset the piece inside it
+        const containerX = coords.clientX;
+        const containerY = coords.clientY;
+        const pieceX = -(draggedPieceInfo.touchOffset.c + 0.5) * gridCellSize * 1.5;
+        const pieceY = -(draggedPieceInfo.touchOffset.r + 0.5) * gridCellSize * 1.5;
+        
+        floatingPieceContainer.style.transform = `translate(${containerX}px, ${containerY}px)`;
+        floatingPiece.style.transform = `translate(${pieceX}px, ${pieceY}px) scale(1.5)`;
+
+        // Calculate grid position for preview
+        const { row: anchorRow, col: anchorCol } = getGridCoordsFromScreen(coords.clientX, coords.clientY);
         const previewRow = anchorRow - draggedPieceInfo.touchOffset.r;
         const previewCol = anchorCol - draggedPieceInfo.touchOffset.c;
-        drawPreview(previewRow, previewCol, draggedPieceInfo.shape, draggedPieceInfo.color);
+        drawPreview(previewRow, previewCol, draggedPieceInfo.shape);
     }
 
     function onDragEnd(e) {
         window.removeEventListener('mousemove', onDragMove);
         window.removeEventListener('touchmove', onDragMove);
-        window.removeEventListener('mouseup', onDragEnd);
-        window.removeEventListener('touchend', onDragEnd);
+        document.body.classList.remove('dragging');
 
         if (!draggedPieceInfo) return;
         try {
             const coords = e.changedTouches ? e.changedTouches[0] : e;
-            const shadowCheckX = coords.clientX;
-            const shadowCheckY = coords.clientY - FLOATING_PIECE_Y_OFFSET;
-            const { row: anchorRow, col: anchorCol } = getGridCoordsFromScreen(shadowCheckX, shadowCheckY);
+            const { row: anchorRow, col: anchorCol } = getGridCoordsFromScreen(coords.clientX, coords.clientY);
             const finalRow = anchorRow - draggedPieceInfo.touchOffset.r;
             const finalCol = anchorCol - draggedPieceInfo.touchOffset.c;
             placePiece(finalRow, finalCol, draggedPieceInfo);
         } finally {
             if (floatingPiece) floatingPieceContainer.innerHTML = '';
             floatingPiece = null;
-            if (draggedPieceInfo && draggedPieceInfo.element.parentElement) draggedPieceInfo.element.style.opacity = '1';
+            const originalPiece = gameState.currentPieces.find(p => p.id === draggedPieceInfo.id);
+            if (originalPiece) originalPiece.element.style.opacity = '1';
             clearPreview();
             draggedPieceInfo = null;
         }
     }
 
     function getGridCoordsFromScreen(screenX, screenY) {
-        if (!gridRect) return { row: 0, col: 0 };
-        let x = Math.max(0, Math.min(screenX - gridRect.left, gridRect.width - 1));
-        let y = Math.max(0, Math.min(screenY - gridRect.top, gridRect.height - 1));
+        if (!gridRect) return { row: -1, col: -1 };
+        if (screenX < gridRect.left || screenX > gridRect.right || screenY < gridRect.top || screenY > gridRect.bottom) {
+            return { row: -1, col: -1 }; // Outside the grid
+        }
+        const x = screenX - gridRect.left;
+        const y = screenY - gridRect.top;
         const col = Math.floor(x / (gridRect.width / GRID_SIZE));
         const row = Math.floor(y / (gridRect.height / GRID_SIZE));
         return { row, col };
     }
 
-    function drawPreview(startRow, startCol, shape, color) {
+    function drawPreview(startRow, startCol, shape) {
         clearPreview();
         if (canPlace(startRow, startCol, shape)) {
             shape.forEach((row, r) => {
                 row.forEach((cell, c) => {
                     if (cell) {
                         const gridCell = getCell(startRow + r, startCol + c);
-                        if (gridCell && !gridCell.classList.contains('filled-cell')) {
-                            gridCell.classList.add('preview');
-                            gridCell.style.backgroundColor = color;
-                        }
+                        if (gridCell) gridCell.classList.add('preview');
                     }
                 });
             });
@@ -902,10 +944,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     function clearPreview() {
-        document.querySelectorAll('.grid-cell.preview').forEach(cell => {
-            cell.classList.remove('preview');
-            if (!cell.classList.contains('filled-cell')) cell.style.backgroundColor = '';
-        });
+        document.querySelectorAll('.grid-cell.preview').forEach(cell => cell.classList.remove('preview'));
     }
 
     // --- Логика игры ---
@@ -927,6 +966,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function placePiece(startRow, startCol, piece) {
         if (!canPlace(startRow, startCol, piece.shape)) return;
         sound.place();
+        const metallicStyle = getMetallicStyle(piece.color);
         piece.shape.forEach((row, r) => {
             row.forEach((cell, c) => {
                 if (cell) {
@@ -934,7 +974,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const boardCol = startCol + c;
                     gameState.gridState[boardRow][boardCol] = { color: piece.color };
                     const gridCell = getCell(boardRow, boardCol);
-                    gridCell.style.backgroundColor = piece.color;
+                    gridCell.style.cssText = metallicStyle;
                     gridCell.classList.add('filled-cell');
                 }
             });
@@ -987,8 +1027,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function updatePiecesAvailability() {
         gameState.currentPieces.forEach(piece => {
             let canBePlaced = false;
-            for (let r = 0; r < GRID_SIZE; r++) {
-                for (let c = 0; c < GRID_SIZE; c++) if (canPlace(r, c, piece.shape)) { canBePlaced = true; break; }
+            for (let r = -piece.shape.length; r < GRID_SIZE; r++) {
+                for (let c = -piece.shape[0].length; c < GRID_SIZE; c++) {
+                    if (canPlace(r, c, piece.shape)) { canBePlaced = true; break; }
+                }
                 if (canBePlaced) break;
             }
             piece.element.classList.toggle('disabled', !canBePlaced);
@@ -1027,7 +1069,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             const cell = getCell(b.row, b.col);
             if(cell && cell.querySelector('.bomb-timer')) {
                 cell.querySelector('.bomb-timer').textContent = b.timer;
-                if(b.timer <= 3 && b.timer > 0) cell.querySelector('.bomb-timer').style.color = 'white';
             }
         });
     }
@@ -1055,7 +1096,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function clearCell(row, col) {
         const cell = getCell(row, col);
         if (cell) {
-            cell.style.backgroundColor = '';
+            cell.style.cssText = '';
             cell.className = 'grid-cell';
             cell.innerHTML = '';
         }
@@ -1173,3 +1214,4 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 </body>
 </html>
+

@@ -412,6 +412,8 @@
     </style>
 </head>
 <body>
+    
+    <audio id="bg-music" loop src="music.mp3"></audio>
 
     <div id="app-container">
 
@@ -494,6 +496,10 @@
         <div class="modal-content">
              <h2 class="modal-title">Настройки</h2>
              <div class="settings-row">
+                <span>Музыка</span>
+                <input type="checkbox" id="music-toggle" class="toggle-switch" checked>
+             </div>
+             <div class="settings-row">
                 <span>Звуковые эффекты</span>
                 <input type="checkbox" id="sound-toggle" class="toggle-switch" checked>
              </div>
@@ -507,47 +513,85 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-    // --- ЗВУКОВОЙ ДВИЖОК "ПИАНИНО" ---
-    const sound = {
-        isInitialized: false,
-        soundsEnabled: true,
+    // --- ЗВУКОВОЙ ДВИЖОК V3 ---
+    const audioManager = {
+        isReady: false,
+        wasMusicPlaying: false,
+        bgMusic: document.getElementById('bg-music'),
         synths: {},
-        init() {
-            if (this.isInitialized || typeof Tone === 'undefined') return;
-            const reverb = new Tone.Reverb(0.6).toDestination();
-            this.synths.tap = new Tone.FMSynth({
-                harmonicity: 3, modulationIndex: 10,
+        settings: { sfx: true, music: true },
+        
+        async init() {
+            if (this.isReady || typeof Tone === 'undefined') return;
+            await Tone.start();
+            
+            const reverb = new Tone.Reverb(0.5).toDestination();
+            reverb.wet.value = 0.4;
+
+            this.synths.tap = new Tone.MembraneSynth({
+                pitchDecay: 0.01, octaves: 6,
+                envelope: { attack: 0.001, decay: 0.2, sustain: 0.01 }
+            }).toDestination();
+            this.synths.tap.volume.value = -12;
+
+            this.synths.place = new Tone.Synth({
+                oscillator: { type: 'sine' },
                 envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 }
             }).connect(reverb);
-            this.synths.place = new Tone.FMSynth({
-                harmonicity: 1, modulationIndex: 5,
-                envelope: { attack: 0.01, decay: 0.3, sustain: 0, release: 0.1 }
-            }).toDestination();
-            this.synths.clear = new Tone.PolySynth(Tone.FMSynth, {
-                harmonicity: 2, modulationIndex: 10,
-                envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.3 }
+            this.synths.place.volume.value = -8;
+
+            this.synths.clear = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: 'triangle' },
+                envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 0.4 }
             }).connect(reverb);
+            this.synths.clear.volume.value = -6;
+
             this.synths.gameOver = new Tone.AMSynth({
                 harmonicity: 1.5,
-                envelope: { attack: 0.05, decay: 1, sustain: 0.2, release: 1 }
+                envelope: { attack: 0.02, decay: 0.8, sustain: 0, release: 0.5 }
             }).toDestination();
-            this.isInitialized = true;
+            this.synths.gameOver.volume.value = -5;
+
+            this.isReady = true;
+            this.updateMusicState();
         },
-        play(synthName, note, duration, time = '+0') {
-            if (!this.isInitialized || !this.soundsEnabled) return;
+        
+        play(type, note, duration, time = '+0') {
+            if (!this.isReady || !this.settings.sfx || !this.synths[type]) return;
             try {
-                this.synths[synthName].triggerAttackRelease(note, duration, Tone.now() + time);
-            } catch(e) { console.warn("Sound play error", e); }
+                this.synths[type].triggerAttackRelease(note, duration, Tone.now() + time);
+            } catch (e) { console.warn("Sound play error", e); }
         },
-        tap() { this.play('tap', 'G5', '16n'); },
-        place() { this.play('place', 'C3', '8n'); },
+        
+        tap() { this.play('tap', 'C4', '8n'); },
+        place() { this.play('place', 'C4', '16n'); },
         clear() {
-            const clearNotes = ['C5', 'E5', 'G5', 'C6'];
-            clearNotes.forEach((note, i) => {
-                this.play('clear', note, '16n', `+${i * 0.07}`);
-            });
+            const notes = ['C5', 'E5', 'G5', 'C6'];
+            notes.forEach((note, i) => this.play('clear', note, '8n', `+${i * 0.09}`));
         },
-        gameOver() { this.play('gameOver', 'A2', '1n'); }
+        gameOver() { this.play('gameOver', 'G2', '2n'); },
+        
+        updateMusicState() {
+            if (this.settings.music) {
+                this.bgMusic.play().catch(e => console.warn("Music play failed", e));
+            } else {
+                this.bgMusic.pause();
+            }
+        },
+        
+        handleVisibilityChange(isVisible) {
+            if (isVisible) {
+                if (this.wasMusicPlaying && this.settings.music) {
+                    this.bgMusic.play().catch(e => {});
+                }
+                this.wasMusicPlaying = false;
+            } else {
+                if (!this.bgMusic.paused) {
+                    this.wasMusicPlaying = true;
+                    this.bgMusic.pause();
+                }
+            }
+        }
     };
     
     // --- Функция для создания текстуры блока ---
@@ -560,7 +604,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
     }
 
-    // --- ОПРЕДЕЛЕНИЕ БЛОКОВ (без изменений) ---
+    // --- ОПРЕДЕЛЕНИЕ БЛОКОВ ---
     const BLOCKS = {
         classic: {
             '1x1': { s: [[[1]]], c: 'var(--c1)' }, '1x2': { s: [[[1, 1]], [[1], [1]]], c: 'var(--c2)' },
@@ -586,19 +630,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // --- Состояние игры ---
     const GRID_SIZE = 8;
-    const DRAG_Y_OFFSET = 60; // How far above the finger the piece floats
+    const DRAG_Y_OFFSET = 80;
     let gameState = {
         gridState: [], score: 0, currentPieces: [], gameMode: 'classic',
         isPaused: false, isGameOver: false, stats: {}, reviveUsed: false,
         timerId: null, timeRemaining: 100, bombCounter: 0, bombs: [],
-        gamesPlayedSinceAd: 0, vkUserId: null, settings: { sounds: true }
+        gamesPlayedSinceAd: 0, vkUserId: null,
+        settings: { sfx: true, music: true }
     };
     let gridRect = null;
 
     // --- Инициализация VK ---
-    async function initVK() {
+    async function initApp() {
+        vkBridge.send('VKWebAppInit');
+        
+        vkBridge.subscribe(e => {
+            if (e.detail.type === 'VKWebAppViewHide') audioManager.handleVisibilityChange(false);
+            if (e.detail.type === 'VKWebAppViewRestore') audioManager.handleVisibilityChange(true);
+        });
+
         try {
-            await vkBridge.send('VKWebAppInit');
             const user = await vkBridge.send('VKWebAppGetUserInfo');
             gameState.vkUserId = user.id;
         } catch (error) {
@@ -606,7 +657,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             gameState.vkUserId = localStorage.getItem('blockPuzzleGuestId') || `guest_${Date.now()}`;
             localStorage.setItem('blockPuzzleGuestId', gameState.vkUserId);
         }
-        await loadData(); 
+        await loadData();
+        await audioManager.init();
         showMainMenu();
     }
     
@@ -614,7 +666,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function init() {
         setupEventListeners();
         createGrid();
-        await initVK(); 
+        await initApp(); 
     }
     
     function createGrid() {
@@ -626,9 +678,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // --- Управление игрой (без изменений) ---
+    // --- Управление игрой ---
     function startGame(mode) {
-        sound.tap();
+        audioManager.tap();
         gameState = { ...gameState, gridState: Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(null)),
             score: 0, isGameOver: false, isPaused: false, gameMode: mode, bombs: [], bombCounter: 0, reviveUsed: false };
         scoreDisplay.textContent = '0';
@@ -636,18 +688,112 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('main-menu').style.display = 'none';
         document.getElementById('game-screen').style.display = 'flex';
         const timeBarContainer = document.getElementById('time-bar-container');
-        if (mode === 'time') { timeBarContainer.style.display = 'block'; startTimer(); } 
-        else { timeBarContainer.style.display = 'none'; if (gameState.timerId) clearInterval(gameState.timerId); }
-        clearAllCells(); generateNewPieces(); updatePiecesAvailability();
+        if (mode === 'time') {
+            timeBarContainer.style.display = 'block';
+            startTimer();
+        } else {
+            timeBarContainer.style.display = 'none';
+            if (gameState.timerId) clearInterval(gameState.timerId);
+        }
+        clearAllCells();
+        generateNewPieces();
+        updatePiecesAvailability();
         setTimeout(() => { gridRect = gridEl.getBoundingClientRect(); }, 100);
         try { vkBridge.send('VKWebAppShowBannerAd', { banner_location: 'bottom' }); } catch(e) { console.error("Banner Ad Error:", e); }
     }
-    function confirmEndGame(reason = '') { /* ... без изменений ... */ }
-    async function revive() { /* ... без изменений ... */ }
-    function showMainMenu() { /* ... без изменений ... */ }
-    function pauseGame(showModal = true) { /* ... без изменений ... */ }
-    function resumeGame() { /* ... без изменений ... */ }
-    function closeAllModals() { /* ... без изменений ... */ }
+    
+    function confirmEndGame(reason = '') {
+        audioManager.gameOver();
+        gameState.isGameOver = true;
+        if (gameState.timerId) clearInterval(gameState.timerId);
+        updateStats();
+        const titleEl = document.getElementById('game-over-title');
+        const reasonEl = document.getElementById('game-over-reason');
+        if (reason === 'no_moves') {
+            titleEl.textContent = 'Ходов не осталось!';
+            reasonEl.textContent = 'Не удалось разместить ни одну из фигур.';
+        } else {
+            titleEl.textContent = 'Игра окончена!';
+            reasonEl.textContent = '';
+        }
+        document.getElementById('final-score').textContent = gameState.score;
+        document.getElementById('game-over-modal').classList.add('active');
+        gameState.gamesPlayedSinceAd++;
+        if (gameState.gamesPlayedSinceAd >= 2) { 
+            vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' })
+                .then(() => gameState.gamesPlayedSinceAd = 0)
+                .catch(e => console.error(e));
+        }
+    }
+
+    function handleGameOver(reason = '') {
+        if (gameState.isGameOver) return;
+        gameState.isGameOver = true;
+        if (gameState.timerId) clearInterval(gameState.timerId);
+        if (!gameState.reviveUsed) {
+            document.getElementById('revive-modal').classList.add('active');
+        } else {
+            confirmEndGame(reason);
+        }
+    }
+
+    async function revive() {
+        audioManager.tap();
+        try {
+            const adResult = await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
+            if (adResult.result) {
+                gameState.reviveUsed = true;
+                const indices = Array.from(Array(GRID_SIZE).keys());
+                const rowsToClear = indices.sort(() => 0.5 - Math.random()).slice(0, 3);
+                const colsToClear = indices.sort(() => 0.5 - Math.random()).slice(0, 3);
+                rowsToClear.forEach(r => { for(let c=0;c<GRID_SIZE;c++) getCell(r,c).classList.add('clearing'); });
+                colsToClear.forEach(c => { for(let r=0;r<GRID_SIZE;r++) getCell(r,c).classList.add('clearing'); });
+                setTimeout(() => {
+                    rowsToClear.forEach(r => { for (let c=0;c<GRID_SIZE;c++) clearCell(r,c); });
+                    colsToClear.forEach(c => { for (let r=0;r<GRID_SIZE;r++) clearCell(r,c); });
+                    gameState.isGameOver = false;
+                    if (gameState.gameMode === 'time') {
+                        gameState.timeRemaining = Math.max(gameState.timeRemaining, 50);
+                        runTimer();
+                    }
+                    postTurnLogic();
+                }, 400);
+            } else {
+                closeAllModals();
+                confirmEndGame();
+            }
+        } catch (e) {
+            console.error('Rewarded Ad error:', e);
+            closeAllModals(); 
+            confirmEndGame();
+        }
+    }
+
+    function showMainMenu() {
+        document.getElementById('main-menu').style.display = 'flex';
+        document.getElementById('game-screen').style.display = 'none';
+        closeAllModals();
+        try { vkBridge.send('VKWebAppShowBannerAd', { banner_location: 'bottom' }); } catch(e) { console.error("Banner Ad Error:", e); }
+    }
+
+    function pauseGame(showModal = true) {
+        if (gameState.isGameOver) return;
+        audioManager.tap();
+        gameState.isPaused = true;
+        if (gameState.timerId) clearInterval(gameState.timerId);
+        if (showModal) document.getElementById('pause-modal').classList.add('active');
+    }
+
+    function resumeGame() {
+        audioManager.tap();
+        gameState.isPaused = false;
+        if (gameState.gameMode === 'time') runTimer();
+        document.getElementById('pause-modal').classList.remove('active');
+    }
+    
+    function closeAllModals() {
+        document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
+    }
 
     // --- Логика блоков ---
     function generateNewPieces() {
@@ -697,7 +843,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return pieceElement;
     }
 
-    // --- ПЕРЕРАБОТАННЫЙ Drag & Drop ---
+    // --- Drag & Drop ---
     let draggedPieceInfo = null;
     let floatingPiece = null;
     function getCoordsFromEvent(e) { return e.touches ? e.touches[0] : e; }
@@ -714,7 +860,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         floatingPiece = draggedPieceInfo.element.cloneNode(true);
         floatingPieceContainer.appendChild(floatingPiece);
         
-        onDragMove(e); // Initial position update
+        onDragMove(e);
         
         draggedPieceInfo.element.style.opacity = '0.3';
         document.body.classList.add('dragging');
@@ -734,18 +880,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         const coords = getCoordsFromEvent(e);
         
-        // Position the container, which follows the finger with a vertical offset
         const containerX = coords.clientX;
         const containerY = coords.clientY - DRAG_Y_OFFSET;
         floatingPieceContainer.style.transform = `translate(${containerX}px, ${containerY}px)`;
 
-        // Center the piece inside the now-offset container
         const pieceRect = floatingPiece.getBoundingClientRect();
         const pieceX = -pieceRect.width / 2;
         const pieceY = -pieceRect.height / 2;
         floatingPiece.style.transform = `translate(${pieceX}px, ${pieceY}px) scale(1.5)`;
 
-        // Calculate grid position for preview based on the floating piece's position
         const { row, col } = getGridCoordsFromScreen(containerX, containerY);
         drawPreview(row, col, draggedPieceInfo.shape);
     }
@@ -825,7 +968,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const startCol = centerCol - Math.floor(piece.shape[0].length / 2);
 
         if (!canPlace(startRow, startCol, piece.shape)) return;
-        sound.place();
+        
+        audioManager.place();
         const blockStyle = getBlockStyle(piece.color);
         piece.shape.forEach((row, r) => {
             row.forEach((cell, c) => {
@@ -846,6 +990,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function postTurnLogic() {
+        if (gameState.isGameOver) return;
         if (gameState.gameMode === 'bomb') processBombTimers();
         if (gameState.currentPieces.length === 0) generateNewPieces();
         updatePiecesAvailability();
@@ -858,7 +1003,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         for (let c = 0; c < GRID_SIZE; c++) if (gameState.gridState.every(r => r[c])) colsToClear.push(c);
         const linesCleared = rowsToClear.length + colsToClear.length;
         if (linesCleared > 0) {
-            sound.clear();
+            audioManager.clear();
             gameState.bombs = gameState.bombs.filter(b => !rowsToClear.includes(b.row) && !colsToClear.includes(b.col));
             rowsToClear.forEach(r => { for(let c=0;c<GRID_SIZE;c++) getCell(r,c).classList.add('clearing'); });
             colsToClear.forEach(c => { for(let r=0;r<GRID_SIZE;r++) getCell(r,c).classList.add('clearing'); });
@@ -891,51 +1036,163 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    // --- Логика режимов (без изменений) ---
-    function processBombTimers() { /* ... без изменений ... */ }
-    function addBomb() { /* ... без изменений ... */ }
-    function updateBombTimers() { /* ... без изменений ... */ }
-    function startTimer() { /* ... без изменений ... */ }
-    function runTimer() { /* ... без изменений ... */ }
+    // --- Логика режимов ---
+    function processBombTimers() {
+        let bombExploded = false;
+        gameState.bombs.forEach(b => { 
+            if (b.timer > 0) { b.timer--; if (b.timer === 0) bombExploded = true; }
+        });
+        updateBombTimers();
+        if (bombExploded) { handleGameOver(); return; }
+        if (++gameState.bombCounter % 10 === 0) addBomb();
+    }
+    function addBomb() {
+        const emptyCells = [];
+        for (let r=0;r<GRID_SIZE;r++) for (let c=0;c<GRID_SIZE;c++) if (!gameState.gridState[r][c]) emptyCells.push({r,c});
+        if (emptyCells.length > 0) {
+            const {r, c} = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+            const newBomb = { row: r, col: c, timer: 10 };
+            gameState.bombs.push(newBomb);
+            gameState.gridState[r][c] = { type: 'bomb', timer: 10 };
+            const cell = getCell(r, c);
+            cell.classList.add('bomb-cell');
+            cell.innerHTML = `<span class="bomb-timer">10</span>`;
+        }
+    }
+    function updateBombTimers() {
+        gameState.bombs.forEach(b => {
+            const cell = getCell(b.row, b.col);
+            if(cell && cell.querySelector('.bomb-timer')) {
+                cell.querySelector('.bomb-timer').textContent = b.timer;
+            }
+        });
+    }
+    function startTimer() {
+        if (gameState.timerId) clearInterval(gameState.timerId);
+        gameState.timeRemaining = 100;
+        document.getElementById('time-bar').style.width = '100%';
+        runTimer();
+    }
+    function runTimer() {
+        if (gameState.timerId) clearInterval(gameState.timerId);
+        gameState.timerId = setInterval(() => {
+            if (gameState.isPaused || gameState.isGameOver) { clearInterval(gameState.timerId); return; }
+            gameState.timeRemaining -= 0.1;
+            document.getElementById('time-bar').style.width = gameState.timeRemaining + '%';
+            if (gameState.timeRemaining <= 0) { clearInterval(gameState.timerId); handleGameOver('time_out'); }
+        }, 100);
+    }
     
-    // --- Вспомогательные функции (без изменений) ---
+    // --- Вспомогательные функции ---
     function updateScore(points) { gameState.score += points; scoreDisplay.textContent = gameState.score; }
     function getCell(row, col) { if (row<0||row>=GRID_SIZE||col<0||col>=GRID_SIZE) return null; return gridEl.children[row*GRID_SIZE+col]; }
-    function clearCell(row, col) { /* ... без изменений ... */ }
+    function clearCell(row, col) {
+        const cell = getCell(row, col);
+        if (cell) {
+            cell.style.cssText = '';
+            cell.className = 'grid-cell';
+            cell.innerHTML = '';
+        }
+        gameState.gridState[row][col] = null;
+    }
     function clearAllCells() { for(let r=0;r<GRID_SIZE;r++) for(let c=0;c<GRID_SIZE;c++) clearCell(r,c); }
 
-    // --- Хранилище и UI (без изменений) ---
-    async function loadData() { /* ... без изменений ... */ }
-    async function saveData() { /* ... без изменений ... */ }
-    async function updateStats() { /* ... без изменений ... */ }
-    function displayStats() { /* ... без изменений ... */ }
-    function displayRules() { /* ... без изменений ... */ }
+    // --- Хранилище и UI ---
+    async function loadData() {
+        const storageKey = `blockManiaData_${gameState.vkUserId}`;
+        let data = null;
+        try {
+            const response = await vkBridge.send('VKWebAppStorageGet', { keys: [storageKey] });
+            if (response.keys[0]?.value) data = response.keys[0].value;
+        } catch (error) { data = localStorage.getItem(storageKey); }
+        const parsedData = data ? JSON.parse(data) : {};
+        gameState.stats = parsedData.stats || { classic: 0, time: 0, bomb: 0, expanded: 0 };
+        gameState.settings = parsedData.settings || { sfx: true, music: true };
+        
+        audioManager.settings.sfx = gameState.settings.sfx;
+        audioManager.settings.music = gameState.settings.music;
+        
+        document.getElementById('sound-toggle').checked = gameState.settings.sfx;
+        document.getElementById('music-toggle').checked = gameState.settings.music;
+    }
+    async function saveData() {
+        const storageKey = `blockManiaData_${gameState.vkUserId}`;
+        const dataToSave = JSON.stringify({ stats: gameState.stats, settings: gameState.settings });
+        try {
+            await vkBridge.send('VKWebAppStorageSet', { key: storageKey, value: dataToSave });
+        } catch (error) { localStorage.setItem(storageKey, dataToSave); }
+    }
+    async function updateStats() {
+        const { gameMode, score, stats } = gameState;
+        if (score > (stats[gameMode] || 0)) {
+            stats[gameMode] = score;
+            highscoreDisplay.textContent = score;
+            await saveData();
+        }
+    }
+    function displayStats() {
+        audioManager.tap();
+        const content = document.getElementById('stats-content');
+        content.innerHTML = '<h2 class="modal-title">Статистика</h2>';
+        const modes = { classic: 'Классика', time: 'Гонка на время', bomb: 'Минное поле', expanded: 'Эксперт' };
+        for (const mode in modes) {
+            const score = gameState.stats[mode] || 0;
+            content.innerHTML += `<div class="settings-row"><span>${modes[mode]}</span><strong>${score}</strong></div>`;
+        }
+        content.innerHTML += '<button class="btn btn-primary" data-action="close">Закрыть</button>';
+        document.getElementById('stats-modal').classList.add('active');
+    }
+    function displayRules() {
+        audioManager.tap();
+        const content = document.getElementById('rules-content');
+        content.innerHTML = `
+            <h2 class="modal-title">Правила</h2>
+            <p style="text-align:left; line-height: 1.5;">
+                <strong>Классика:</strong> Размещайте фигуры, чтобы заполнять и очищать линии.<br><br>
+                <strong>Гонка на время:</strong> То же, но со шкалой времени, которая пополняется за очищенные линии.<br><br>
+                <strong>Минное поле:</strong> На поле появляются бомбы. Очистите линию с бомбой, пока не истек ее таймер.<br><br>
+                <strong>Эксперт:</strong> Классический режим с более сложными и редкими фигурами.
+            </p>
+            <button class="btn btn-primary" data-action="close">Понятно</button>
+        `;
+        document.getElementById('rules-modal').classList.add('active');
+    }
 
-    // --- Обработчики событий (без изменений) ---
+    // --- Обработчики событий ---
     function setupEventListeners() {
         document.getElementById('rules-btn').addEventListener('click', displayRules);
         document.getElementById('stats-btn').addEventListener('click', displayStats);
-        document.getElementById('settings-btn').addEventListener('click', () => { sound.tap(); document.getElementById('settings-modal').classList.add('active'); });
+        document.getElementById('settings-btn').addEventListener('click', () => { audioManager.tap(); document.getElementById('settings-modal').classList.add('active'); });
         document.getElementById('pause-btn').addEventListener('click', () => pauseGame());
+        
         document.getElementById('sound-toggle').addEventListener('change', (e) => {
-            gameState.settings.sounds = e.target.checked;
-            sound.soundsEnabled = e.target.checked; saveData(); sound.tap();
+            gameState.settings.sfx = e.target.checked;
+            audioManager.settings.sfx = e.target.checked;
+            saveData();
+            audioManager.tap();
         });
+        document.getElementById('music-toggle').addEventListener('change', (e) => {
+            gameState.settings.music = e.target.checked;
+            audioManager.settings.music = e.target.checked;
+            saveData();
+            audioManager.updateMusicState();
+        });
+
         document.body.addEventListener('click', (e) => {
-            sound.init(); 
             const modeTarget = e.target.closest('[data-mode]');
             if (modeTarget) { startGame(modeTarget.dataset.mode); return; }
             const actionTarget = e.target.closest('[data-action]');
             if (actionTarget) {
                 const action = actionTarget.dataset.action;
-                if (action === 'close') closeAllModals();
+                if (action === 'close') { audioManager.tap(); closeAllModals(); }
                 if (action === 'resume') resumeGame();
-                if (action === 'quit') { sound.tap(); showMainMenu(); }
-                if (action === 'restart') { sound.tap(); startGame(gameState.gameMode); }
+                if (action === 'quit') { audioManager.tap(); showMainMenu(); }
+                if (action === 'restart') { audioManager.tap(); closeAllModals(); startGame(gameState.gameMode); }
                 if (action === 'revive') revive();
-                if (action === 'end-game-confirm') { sound.tap(); closeAllModals(); confirmEndGame('no_moves'); }
+                if (action === 'end-game-confirm') { audioManager.tap(); closeAllModals(); confirmEndGame('no_moves'); }
             }
         });
+
         piecesContainer.addEventListener('mousedown', onDragStart);
         piecesContainer.addEventListener('touchstart', onDragStart, { passive: false });
         document.addEventListener('contextmenu', e => e.preventDefault());

@@ -529,7 +529,7 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-    // --- ЗВУКОВОЙ ДВИЖОК V3 ---
+    // --- AUDIO MANAGER V4 (STABLE) ---
     const audioManager = {
         isReady: false,
         wasMusicPlaying: false,
@@ -539,36 +539,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         async init() {
             if (this.isReady || typeof Tone === 'undefined') return;
-            // Autoplay requires user interaction. This will be triggered on first body click.
             await Tone.start();
             
             this.bgMusic.volume = 0.3;
 
+            // Define synths
             const reverb = new Tone.Reverb(0.5).toDestination();
             reverb.wet.value = 0.4;
-
-            this.synths.tap = new Tone.MembraneSynth({
-                pitchDecay: 0.01, octaves: 6,
-                envelope: { attack: 0.001, decay: 0.2, sustain: 0.01 }
-            }).toDestination();
+            this.synths.tap = new Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 6, envelope: { attack: 0.001, decay: 0.2, sustain: 0.01 } }).toDestination();
             this.synths.tap.volume.value = -12;
-
-            this.synths.place = new Tone.Synth({
-                oscillator: { type: 'sine' },
-                envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 }
-            }).connect(reverb);
+            this.synths.place = new Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 } }).connect(reverb);
             this.synths.place.volume.value = -8;
-
-            this.synths.clear = new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: 'triangle' },
-                envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 0.4 }
-            }).connect(reverb);
+            this.synths.clear = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 0.4 } }).connect(reverb);
             this.synths.clear.volume.value = -6;
-
-            this.synths.gameOver = new Tone.AMSynth({
-                harmonicity: 1.5,
-                envelope: { attack: 0.02, decay: 0.8, sustain: 0, release: 0.5 }
-            }).toDestination();
+            this.synths.gameOver = new Tone.AMSynth({ harmonicity: 1.5, envelope: { attack: 0.02, decay: 0.8, sustain: 0, release: 0.5 } }).toDestination();
             this.synths.gameOver.volume.value = -5;
 
             this.isReady = true;
@@ -592,7 +576,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         updateMusicState() {
             if (this.settings.music && this.isReady) {
-                this.bgMusic.play().catch(e => console.warn("Music play failed - likely needs user interaction.", e));
+                this.bgMusic.play().catch(e => {});
             } else {
                 this.bgMusic.pause();
             }
@@ -610,16 +594,31 @@ document.addEventListener('DOMContentLoaded', async () => {
                     this.bgMusic.pause();
                 }
             }
+        },
+
+        // This function should be called after an ad is closed
+        refreshStateAfterAd() {
+            if (!this.isReady) return;
+            // Re-check context state. If it's suspended, try to resume.
+            if (Tone.context.state !== 'running') {
+                Tone.context.resume().then(() => {
+                    this.updateMusicState();
+                });
+            } else {
+                this.updateMusicState();
+            }
         }
     };
     
-    // --- Функция для создания текстуры блока ---
+    // --- NEW BLOCK STYLE FUNCTION ---
     function getBlockStyle(color) {
         return `
             background-color: ${color};
-            box-shadow: inset 0px 0px 0px 1px rgba(0,0,0,0.2), 
-                        inset 2px 2px 2px 0px rgba(255,255,255,0.25), 
-                        inset -2px -2px 2px 0px rgba(0,0,0,0.25);
+            background-image: linear-gradient(45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.08) 75%, transparent 75%, transparent);
+            background-size: 10px 10px;
+            box-shadow: inset 1px 1px 1px 0 rgba(255,255,255,0.3), 
+                        inset -1px -1px 1px 0 rgba(0,0,0,0.4),
+                        0 2px 3px 0 rgba(0,0,0,0.2);
         `;
     }
 
@@ -677,7 +676,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             localStorage.setItem('blockPuzzleGuestId', gameState.vkUserId);
         }
         await loadData();
-        // Defer audio init until first user interaction
         showMainMenu();
     }
     
@@ -740,8 +738,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         gameState.gamesPlayedSinceAd++;
         if (gameState.gamesPlayedSinceAd >= 2) { 
             vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' })
-                .then(() => gameState.gamesPlayedSinceAd = 0)
-                .catch(e => console.error(e));
+                .then( (res) => { 
+                    gameState.gamesPlayedSinceAd = 0;
+                    audioManager.refreshStateAfterAd();
+                })
+                .catch(e => {
+                    console.error(e);
+                    audioManager.refreshStateAfterAd();
+                });
         }
     }
 
@@ -760,8 +764,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         audioManager.tap();
         try {
             const adResult = await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
-            // Always update music state after ad regardless of result
-            audioManager.updateMusicState();
+            
+            audioManager.refreshStateAfterAd();
 
             if (adResult.result) {
                 closeAllModals();
@@ -787,7 +791,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (e) {
             console.error('Rewarded Ad error:', e);
-            audioManager.updateMusicState(); // Also update on error
+            audioManager.refreshStateAfterAd();
             closeAllModals(); 
             confirmEndGame();
         }
@@ -934,7 +938,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         } finally {
             if (floatingPiece) floatingPieceContainer.innerHTML = '';
             floatingPiece = null;
-            // Ensure we check if the piece still exists before changing its style
             const originalPiece = gameState.currentPieces.find(p => p && p.id === draggedPieceInfo.id);
             if (originalPiece) originalPiece.element.style.opacity = '1';
             clearPreview();

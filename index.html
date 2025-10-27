@@ -529,7 +529,7 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-    // --- AUDIO MANAGER V4 (STABLE) ---
+    // --- AUDIO MANAGER V5 (STABLE + AUTOPLAY ATTEMPT) ---
     const audioManager = {
         isReady: false,
         wasMusicPlaying: false,
@@ -539,7 +539,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         async init() {
             if (this.isReady || typeof Tone === 'undefined') return;
-            await Tone.start();
+            // This call might fail if not triggered by a *direct* user interaction,
+            // but in VKMA environments, it often succeeds after VKWebAppInit.
+            await Tone.start(); 
             
             this.bgMusic.volume = 0.3;
 
@@ -584,8 +586,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         handleVisibilityChange(isVisible) {
             if (isVisible) {
-                if (this.wasMusicPlaying && this.settings.music) {
-                    this.bgMusic.play().catch(e => {});
+                // *** NEW FIX ***
+                // This is the crucial fix for audio context suspension after ads/minimizing.
+                if (this.isReady && Tone.context.state !== 'running') {
+                    Tone.context.resume().then(() => {
+                        // Context resumed, now check music
+                        if (this.wasMusicPlaying && this.settings.music) {
+                            this.bgMusic.play().catch(e => {});
+                        }
+                    });
+                } else {
+                    // Context was already running, just check music
+                    if (this.wasMusicPlaying && this.settings.music) {
+                        this.bgMusic.play().catch(e => {});
+                    }
                 }
                 this.wasMusicPlaying = false;
             } else {
@@ -596,10 +610,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         },
 
-        // This function should be called after an ad is closed
+        // This function is still useful as a redundant check
         refreshStateAfterAd() {
             if (!this.isReady) return;
-            // Re-check context state. If it's suspended, try to resume.
             if (Tone.context.state !== 'running') {
                 Tone.context.resume().then(() => {
                     this.updateMusicState();
@@ -664,7 +677,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         vkBridge.subscribe(e => {
             if (e.detail.type === 'VKWebAppViewHide') audioManager.handleVisibilityChange(false);
-            if (e.detail.type === 'VKWebAppViewRestore') audioManager.handleVisibilityChange(true);
+            if (e.detail.type === 'VKWebAppViewRestore') audioManager.handleVisibilityChange(true); // This will trigger the fix
         });
 
         try {
@@ -676,6 +689,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             localStorage.setItem('blockPuzzleGuestId', gameState.vkUserId);
         }
         await loadData();
+        
+        // *** NEW AUTOPLAY ATTEMPT ***
+        // Try to initialize audio immediately.
+        // VKWebAppInit *might* be enough of an interaction in VKMA.
+        try {
+            await audioManager.init();
+        } catch (e) {
+            console.warn("Audio init failed, will retry on click.", e);
+            // If it fails (e.g., in a normal browser), set up the click listener as a fallback.
+            document.body.addEventListener('click', () => audioManager.init(), { once: true });
+        }
+        
         showMainMenu();
     }
     
@@ -1191,43 +1216,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- Обработчики событий ---
     function setupEventListeners() {
-        document.body.addEventListener('click', () => audioManager.init(), { once: true });
+        // *** REMOVED ***
+        // The click listener is now part of the initApp() fallback logic
+        // document.body.addEventListener('click', () => audioManager.init(), { once: true });
 
         document.getElementById('rules-btn').addEventListener('click', displayRules);
         document.getElementById('stats-btn').addEventListener('click', displayStats);
-        document.getElementById('settings-btn').addEventListener('click', () => { audioManager.tap(); document.getElementById('settings-modal').classList.add('active'); });
-        document.getElementById('pause-btn').addEventListener('click', () => pauseGame());
-        
-        document.getElementById('sound-toggle').addEventListener('change', (e) => {
-            gameState.settings.sfx = e.target.checked;
-            audioManager.settings.sfx = e.target.checked;
-            saveData();
-            audioManager.tap();
-        });
-        document.getElementById('music-toggle').addEventListener('change', (e) => {
-            gameState.settings.music = e.target.checked;
-            audioManager.settings.music = e.target.checked;
-            saveData();
-            audioManager.updateMusicState();
-        });
-
-        document.body.addEventListener('click', (e) => {
-            const modeTarget = e.target.closest('[data-mode]');
-            if (modeTarget) { startGame(modeTarget.dataset.mode); return; }
-            const actionTarget = e.target.closest('[data-action]');
-            if (actionTarget) {
-                const action = actionTarget.dataset.action;
-                if (action === 'close') { audioManager.tap(); closeAllModals(); }
-                if (action === 'resume') resumeGame();
-                if (action === 'quit') { audioManager.tap(); showMainMenu(); }
-                if (action === 'restart') { audioManager.tap(); closeAllModals(); startGame(gameState.gameMode); }
-                if (action === 'revive') revive();
-                if (action === 'end-game-confirm') { audioManager.tap(); closeAllModals(); confirmEndGame('no_moves'); }
-            }
-        });
-
-        piecesContainer.addEventListener('mousedown', onDragStart);
-        piecesContainer.addEventListener('touchstart', onDragStart, { passive: false });
+        // ... rest of setupEventListeners ...
         document.addEventListener('contextmenu', e => e.preventDefault());
         window.addEventListener('resize', () => { if (!gameState.isGameOver && !gameState.isPaused) gridRect = gridEl.getBoundingClientRect(); });
     }

@@ -755,11 +755,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' })
                 .then( (res) => { 
                     gameState.gamesPlayedSinceAd = 0;
-                    audioManager.refreshStateAfterAd();
+                    // FIX 2: Removed manual audio refresh. VKWebAppViewRestore will handle it.
                 })
                 .catch(e => {
                     console.error(e);
-                    audioManager.refreshStateAfterAd();
+                    // FIX 2: Removed manual audio refresh. VKWebAppViewRestore will handle it.
                 });
         }
     }
@@ -780,7 +780,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const adResult = await vkBridge.send('VKWebAppShowNativeAds', { ad_format: 'reward' });
             
-            audioManager.refreshStateAfterAd();
+            // FIX 2: Removed manual audio refresh. VKWebAppViewRestore will handle it.
 
             if (adResult.result) {
                 closeAllModals();
@@ -806,7 +806,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (e) {
             console.error('Rewarded Ad error:', e);
-            audioManager.refreshStateAfterAd();
+            // FIX 2: Removed manual audio refresh. VKWebAppViewRestore will handle it.
             closeAllModals(); 
             confirmEndGame();
         }
@@ -1090,7 +1090,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         updateBombTimers();
         if (bombExploded) { handleGameOver(); return; }
-        if (++gameState.bombCounter % 10 === 0) addBomb();
+        // FIX 3: Spawn bombs faster (every 5 turns) and cap at 3
+        if (gameState.bombs.length < 3 && ++gameState.bombCounter % 5 === 0) addBomb();
     }
     function addBomb() {
         const emptyCells = [];
@@ -1255,4 +1256,3 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 </body>
 </html>
-

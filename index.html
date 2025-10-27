@@ -529,7 +529,7 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
-    // --- AUDIO MANAGER V5 (STABLE + AUTOPLAY ATTEMPT) ---
+    // --- AUDIO MANAGER V6 (RELIABLE CLICK-TO-START) ---
     const audioManager = {
         isReady: false,
         wasMusicPlaying: false,
@@ -539,8 +539,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         async init() {
             if (this.isReady || typeof Tone === 'undefined') return;
-            // This call might fail if not triggered by a *direct* user interaction,
-            // but in VKMA environments, it often succeeds after VKWebAppInit.
+            // This MUST be triggered by a user interaction.
             await Tone.start(); 
             
             this.bgMusic.volume = 0.3;
@@ -586,7 +585,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         handleVisibilityChange(isVisible) {
             if (isVisible) {
-                // *** NEW FIX ***
                 // This is the crucial fix for audio context suspension after ads/minimizing.
                 if (this.isReady && Tone.context.state !== 'running') {
                     Tone.context.resume().then(() => {
@@ -690,16 +688,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         await loadData();
         
-        // *** NEW AUTOPLAY ATTEMPT ***
-        // Try to initialize audio immediately.
-        // VKWebAppInit *might* be enough of an interaction in VKMA.
-        try {
-            await audioManager.init();
-        } catch (e) {
-            console.warn("Audio init failed, will retry on click.", e);
-            // If it fails (e.g., in a normal browser), set up the click listener as a fallback.
-            document.body.addEventListener('click', () => audioManager.init(), { once: true });
-        }
+        // *** FIX ***
+        // We will not init audio here. It will be initialized on the first click.
         
         showMainMenu();
     }
@@ -1216,13 +1206,45 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- Обработчики событий ---
     function setupEventListeners() {
-        // *** REMOVED ***
-        // The click listener is now part of the initApp() fallback logic
-        // document.body.addEventListener('click', () => audioManager.init(), { once: true });
+        // *** FIX ***
+        // This is the correct, reliable way to initialize Tone.js.
+        document.body.addEventListener('click', () => audioManager.init(), { once: true });
 
         document.getElementById('rules-btn').addEventListener('click', displayRules);
         document.getElementById('stats-btn').addEventListener('click', displayStats);
-        // ... rest of setupEventListeners ...
+        document.getElementById('settings-btn').addEventListener('click', () => { audioManager.tap(); document.getElementById('settings-modal').classList.add('active'); });
+        document.getElementById('pause-btn').addEventListener('click', () => pauseGame());
+        
+        document.getElementById('sound-toggle').addEventListener('change', (e) => {
+            gameState.settings.sfx = e.target.checked;
+            audioManager.settings.sfx = e.target.checked;
+            saveData();
+            audioManager.tap();
+        });
+        document.getElementById('music-toggle').addEventListener('change', (e) => {
+            gameState.settings.music = e.target.checked;
+            audioManager.settings.music = e.target.checked;
+            saveData();
+            audioManager.updateMusicState();
+        });
+
+        document.body.addEventListener('click', (e) => {
+            const modeTarget = e.target.closest('[data-mode]');
+            if (modeTarget) { startGame(modeTarget.dataset.mode); return; }
+            const actionTarget = e.target.closest('[data-action]');
+            if (actionTarget) {
+                const action = actionTarget.dataset.action;
+                if (action === 'close') { audioManager.tap(); closeAllModals(); }
+                if (action === 'resume') resumeGame();
+                if (action === 'quit') { audioManager.tap(); showMainMenu(); }
+                if (action === 'restart') { audioManager.tap(); closeAllModals(); startGame(gameState.gameMode); }
+                if (action === 'revive') revive();
+                if (action === 'end-game-confirm') { audioManager.tap(); closeAllModals(); confirmEndGame('no_moves'); }
+            }
+        });
+
+        piecesContainer.addEventListener('mousedown', onDragStart);
+        piecesContainer.addEventListener('touchstart', onDragStart, { passive: false });
         document.addEventListener('contextmenu', e => e.preventDefault());
         window.addEventListener('resize', () => { if (!gameState.isGameOver && !gameState.isPaused) gridRect = gridEl.getBoundingClientRect(); });
     }

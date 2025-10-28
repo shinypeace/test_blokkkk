@@ -585,19 +585,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         handleVisibilityChange(isVisible) {
             if (isVisible) {
-                // This is the crucial fix for audio context suspension after ads/minimizing.
+                // FIX 2: "Силовое" возобновление.
+                // Сначала будим аудио-контекст, если он "уснул".
                 if (this.isReady && Tone.context.state !== 'running') {
-                    Tone.context.resume().then(() => {
-                        // Context resumed, now check music
-                        if (this.wasMusicPlaying && this.settings.music) {
-                            this.bgMusic.play().catch(e => {});
-                        }
-                    });
-                } else {
-                    // Context was already running, just check music
-                    if (this.wasMusicPlaying && this.settings.music) {
+                    Tone.context.resume().catch(e => console.warn("Context resume failed", e));
+                }
+                
+                // Всегда пытаемся запустить музыку, если она играла до рекламы.
+                if (this.wasMusicPlaying && this.settings.music && this.isReady) {
+                    // Даем контексту 100мс на "пробуждение"
+                    setTimeout(() => {
                         this.bgMusic.play().catch(e => {});
-                    }
+                    }, 100); 
                 }
                 this.wasMusicPlaying = false;
             } else {
@@ -688,8 +687,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         await loadData();
         
-        // *** FIX ***
-        // We will not init audio here. It will be initialized on the first click.
+        // FIX 1: Попытка авто-запуска музыки при загрузке (как в "ВК Интеграция").
+        // Может не сработать (это нормально), тогда клик все исправит.
+        if (gameState.settings.music) {
+            audioManager.bgMusic.play().catch(e => { /* Autoplay failed, wait for click */ });
+        }
         
         showMainMenu();
     }
@@ -1207,9 +1209,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- Обработчики событий ---
     function setupEventListeners() {
-        // *** FIX ***
-        // This is the correct, reliable way to initialize Tone.js.
-        document.body.addEventListener('click', () => audioManager.init(), { once: true });
+        // *** FIX 1 ***
+        // Теперь клик только "разблокирует" Tone.js, если он еще не готов.
+        document.body.addEventListener('click', async () => {
+            if (!audioManager.isReady) {
+                await audioManager.init(); // init() уже содержит updateMusicState()
+            }
+        }, { once: true });
 
         document.getElementById('rules-btn').addEventListener('click', displayRules);
         document.getElementById('stats-btn').addEventListener('click', displayStats);
@@ -1256,3 +1262,4 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 </body>
 </html>
+
